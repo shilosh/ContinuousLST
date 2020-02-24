@@ -105,7 +105,6 @@ var k2celsius = function(image) {
 var CFSV2 = ee.ImageCollection('NOAA/CFSV2/FOR6H')
             .filterDate(firstDay, lastDay)
             .select('Maximum_temperature_height_above_ground_6_Hour_Interval')
-            .filter(ee.Filter.eq('start_hour', 12))
             .filter(ee.Filter.stringEndsWith('system:index', '12'))
             .map(k2celsius)
             // .map(Reproject)
