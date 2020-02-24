@@ -1,3 +1,4 @@
+// Change the path to your own TFA images
 var CFSV2_TFA = ee.Image("users/shilosh/CFSv2_Daily_LST_TFA"),
     MODIS_TFA = ee.Image("users/shilosh/MODIS_Daily_LST_TFA");
 // Map.setCenter(35,32,8)
