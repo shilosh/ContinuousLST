@@ -1,3 +1,4 @@
+// Change the path to your own TFA images
 var CFSV2_TFA = ee.Image("users/shilosh/CFSv2_Day_LST_TFA"),
     MODIS_TFA = ee.Image("users/shilosh/MODIS_Day_LST_TFA");
 // create list of years over which to iterate
