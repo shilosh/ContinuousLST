@@ -1,0 +1,224 @@
+var CFSV2_TFA = ee.Image("users/shilosh/CFSv2_Day_LST_TFA"),
+    MODIS_TFA = ee.Image("users/shilosh/MODIS_Day_LST_TFA");
+// create list of years over which to iterate
+var years = ee.List.sequence(2002, 2019);
+// Iterate through years 
+var correlation_statistics_by_year = years.map(function(year) {
+// var year = 2017
+  var calculation_state = 'TFA plus anomalies'
+  // var calculation_state = 'TFA only'
+  var firstDay = ee.Algorithms.String(ee.Number(year).toInt()).cat('-01-01');
+  var lastDay  = ee.Algorithms.String(ee.Number(year).add(1).toInt()).cat('-01-01');
+  var geometry = ee.Geometry.Rectangle([33.2,29.0,36.6,34.0]);
+  var geometry_json = geometry.toGeoJSON(); 
+
+// Reverse the images into imageCollections
+var MODIS_TFA_ic = ee.ImageCollection(MODIS_TFA.bandNames().map(function(name) { 
+  return MODIS_TFA.select([ee.Algorithms.String(name)],['mod']).set('system:DOY', ee.Number.parse(ee.Algorithms.String(name).replace('TFA','0').replace('_','')).add(1)) }))
+var CFSV2_TFA_ic = ee.ImageCollection(CFSV2_TFA.bandNames().map(function(name) { 
+  return CFSV2_TFA.select([ee.Algorithms.String(name)],['cfs']).set('system:DOY', ee.Number.parse(ee.Algorithms.String(name).replace('TFA','0').replace('_','')).add(1)) }))
+
+//convert Kelvin to Celsius
+var modis_k2celsius = function(image) {
+      return image.multiply(ee.Image(0.02))
+                  .subtract(ee.Image(273.15))
+                  .set('system:time_start', image.get('system:time_start'));
+};
+
+// Reproject to CFSv2 projection and reduce resolution
+// Get information about the CFSV2 projection.
+var Reproject = function(img){
+ var CFSV2Projection = CFSV2_TFA.projection();
+ var scale = CFSV2_TFA.projection().nominalScale().getInfo();
+// Get the MODIS data at CFSV2 scale and projection.
+var mod = img
+    // Force the next reprojection to aggregate instead of resampling.
+    .reduceResolution({
+      reducer: ee.Reducer.mean(),
+      maxPixels: 10000
+    })
+    // Request the data at the scale and projection of the CFSV2 image.
+    .reproject({
+      crs: CFSV2Projection,
+      scale: scale 
+    });
+    return mod;
+};
+
+// Add a property with doy to the colection.
+function createDoyBand(img) {
+  var d = ee.Date(img.get('system:time_start'))
+    .getRelative('day', 'year')
+    .add(1);
+  img=img.set('system:DOY', d);
+  return img;
+}
+
+// Construct image date from 'system:index' and add it to a new 'date' property 
+var addTimeStampToModis = function(image) {
+  var start = ee.String(image.get('system:index'));
+  var y = start.slice(0,4);
+  var m = start.slice(5,7);
+  var d = start.slice(8,10);
+  var date = y.cat('-').cat(m).cat('-').cat(d);
+  return image.set({'system:time_start': date});
+};
+
+// Construct image date from 'system:index' and add it to a new 'date' property 
+var addTimeStampToCFSv2 = function(image) {
+   var start = ee.String(image.get('system:index'));
+   var y = start.slice(0,4);
+   var m = start.slice(4,6);
+   var d = start.slice(6,8);
+   var date = y.cat('-').cat(m).cat('-').cat(d);
+   return image.set({'system:time_start': date});
+};
+
+// Mask modis
+var mask_good_quality = function(image) {
+  var QCDay = image.select('QC_Day');
+  var QC = (QCDay.neq(2)).and(QCDay.neq(3));
+  return image.updateMask(QC)
+              .select('LST_Day_1km')
+              .set('system:time_start', image.get('system:time_start'))
+};
+
+// Load imageCollection of MODIS LST
+var MODIS_LST = ee.ImageCollection('MODIS/006/MYD11A1')
+            .filterDate(firstDay, lastDay) 
+            .select('LST_Day_1km', 'QC_Day')
+            .map(mask_good_quality)
+            .map(modis_k2celsius)
+            // .map(Reproject)
+            .map(addTimeStampToModis)
+            .map(createDoyBand);
+var filter_low_values = require('users/shilosh/default:filter_modis_low_values_func');
+MODIS_LST = filter_low_values.filter_modis_low_values(MODIS_LST, -9);
+
+//convert Kelvin to Celsius
+var k2celsius = function(image) {
+      return image.subtract(ee.Image(273.15))   
+                  .set('system:time_start', image.get('system:time_start'));
+};
+
+// Load imageCollection of CFSv2 Temperature over ground
+var CFSV2 = ee.ImageCollection('NOAA/CFSV2/FOR6H')
+            .filterDate(firstDay, lastDay)
+            .select('Maximum_temperature_height_above_ground_6_Hour_Interval')
+            .filter(ee.Filter.eq('start_hour', 12))
+            .filter(ee.Filter.stringEndsWith('system:index', '12'))
+            .map(k2celsius)
+            // .map(Reproject)
+            .map(addTimeStampToCFSv2)
+            .map(createDoyBand);
+
+// Use an equals filter to specify how the collections match.
+var Filter = ee.Filter.equals({
+  leftField: 'system:DOY',
+  rightField: 'system:DOY'
+});
+  // Define the join.
+  var innerJoin = ee.Join.inner('primary', 'secondary');
+
+// Join CFSV2 with CFSV2_TFA_ic by DOY
+  // Apply the join.
+  var CFSV2_JoinInner = innerJoin.apply(CFSV2, CFSV2_TFA_ic, Filter);
+  
+// Calculate CFSv2 anomalies
+var CFSV2_Anomalies = CFSV2_JoinInner.map(function(f) {
+  var tfa = ee.Image(f.get('secondary'));
+  var actual = ee.Image(f.get('primary'));
+  return actual.subtract(tfa);
+}).map(addTimeStampToCFSv2)
+               .map(createDoyBand);
+
+// Join MODIS_TFA_ic with CFSV2_Anomalies by DOY
+  // Apply the join.
+  var MODIS_JoinInner = innerJoin.apply(CFSV2_Anomalies, MODIS_TFA_ic, Filter);
+
+// Calculate MODIS TFA Plus CFSv2 anomalies
+  var MODIS_Continuous = MODIS_JoinInner.map(function(f) {
+    var tfa       = ee.Image(f.get('secondary'));
+    var anomalies = ee.Image(f.get('primary'));
+    switch(calculation_state){
+      case 'TFA plus anomalies':
+        return anomalies.add(tfa);
+      case 'TFA only':
+        return anomalies.add(tfa).subtract(anomalies);
+    }
+  }).map(addTimeStampToCFSv2)
+                 .map(createDoyBand);
+
+// Join MODIS_Anomalies with CFSV2_Anomalies by DOY
+  // Apply the join.
+  var Continuous_JoinInner = innerJoin.apply(MODIS_LST, MODIS_Continuous, Filter);
+
+// Mask CFSv2 
+var MaskedValues = Continuous_JoinInner.map(function(f) {
+  var con = ee.Image(f.get('secondary'));
+  var mod = ee.Image(f.get('primary'));
+  con = ee.Image(con.float()).updateMask(ee.Image(mod).add(10));
+  mod = ee.Image(mod.float()).updateMask(ee.Image(con).add(10));
+  var mod_vs_cfs = ee.Image(mod).addBands(con);
+  mod_vs_cfs = ee.Image(mod_vs_cfs).select(['LST_Day_1km','Maximum_temperature_height_above_ground_6_Hour_Interval'],['mod','con'])
+  // mod_vs_cfs = ee.Image(mod_vs_cfs).select(['LST_Day_1km','Temperature_height_above_ground'],['mod','cfs'])
+  // mod_vs_cfs = ee.Image(mod_vs_cfs).select(['LST_Day_1km'],['mod'])
+  // var image = ee.Image(mod_vs_cfs).select(['LST_Day_1km','Temperature_height_above_ground'],['mod','cfs']).reduceRegion(ee.Reducer.toList());
+  // var x = image.get('mod');
+  // var y = image.get('cfs');
+  return mod_vs_cfs
+});
+
+  var differences_squared = function(image) {
+    var differences = ee.Image(image).select('con').subtract(ee.Image(image).select('mod') )
+    differences = ee.Image(differences).multiply(differences);
+    return differences;
+  };
+  var mean_of_differences_squared = MaskedValues.map(differences_squared)
+  mean_of_differences_squared = ee.ImageCollection(mean_of_differences_squared).mean()                                              
+  // print('mean_of_differences_squared = ', mean_of_differences_squared)
+  var rmse = mean_of_differences_squared.sqrt()
+  
+  var mean_absolut_error = function(image) {
+    var differences = ee.Image(image).select('con').subtract(ee.Image(image).select('mod') )
+    differences = ee.Image(differences).abs();
+    return differences;
+  };
+  var MAE = MaskedValues.map(mean_absolut_error)
+  MAE = ee.ImageCollection(MAE).mean()                                              
+  
+  var Pearson = ee.ImageCollection(MaskedValues).reduce(ee.Reducer.pearsonsCorrelation());
+  
+  var scale = ee.Image('MODIS/006/MYD11A1/2018_01_01').projection().nominalScale().getInfo();
+  var scale = ee.Image('NOAA/CFSV2/FOR6H/2018010112').projection().nominalScale().getInfo();
+  var CFSV2Projection = CFSV2_TFA.projection();
+  // var scale = CFSV2_TFA.projection().nominalScale().getInfo();
+  var rmse_val = rmse.reduceRegion(ee.Reducer.mean(), geometry, scale)
+  var MAE_val = MAE.reduceRegion(ee.Reducer.mean(), geometry_json, scale)
+  var Pearson_val = Pearson.select('correlation').reduceRegion({
+    reducer:ee.Reducer.mean(),
+    geometry:geometry_json,
+    scale:scale,
+    crs:CFSV2Projection,
+    })
+
+// print('RMSE = ', rmse_val)  
+  var f = ee.Feature(null,{
+        'year'    : year,
+        'Pearson' : Pearson_val,
+        'RMSE'    : rmse_val,
+        'MAE'     : MAE_val,
+      })
+  return f;
+})
+
+var fromList = ee.FeatureCollection(correlation_statistics_by_year);
+print(fromList);
+// Export the FeatureCollection to a CSV file.
+Export.table.toDrive({
+  collection: fromList,
+  // description:'Day_TFA_only',
+  description:'Day_TFA_plus_anomalies',
+  folder: 'gee',
+  fileFormat: 'CSV'
+});
