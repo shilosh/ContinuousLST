@@ -180,7 +180,7 @@ Filter = ee.Filter.equals({
 var MODIS_LST_Blended = MODIS_Blended_JoinInner.map(function(f) {
   var prediction = ee.Image(f.get('secondary'));
   var lst = ee.Image(f.get('primary'));
-  return lst.blend(prediction);
+  return prediction.blend(lst);
 })
 
 // print(MODIS_LST_Blended)
