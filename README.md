@@ -5,3 +5,5 @@ For producing the dataset, one should first run MODIS_TFA_Daily_Mean_Export_2_As
 
 <a href="https://doi.org/10.5281/zenodo.3952604"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.3952604.svg" alt="DOI"></a>
 
+### How to visualize data using Qgis open source program
+<img src="https://github.com/shilosh/ContinuousLST/blob/master/LST_in_Qgis.gif" alt="LST in Qgis">
