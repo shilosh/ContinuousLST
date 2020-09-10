@@ -154,7 +154,6 @@ var contLST = function(day, geometry){
               //.map(function (image){return image.reduce(ee.Reducer.mean())})
               .map(addTimeStampToMODIS)
               .map(modis_k2celsius)
-  
   // Use an equals filter to specify how the collections match.
   Filter = ee.Filter.equals({
     leftField: 'system:time_start',
@@ -264,12 +263,17 @@ var contLST = function(day, geometry){
     var lst = ee.Image(f.get('primary'));
     return prediction.blend(lst);
   })
-  // *******
-  return ee.Image(MODIS_LST_Blended_Daily.first())
-              .addBands(ee.Image(MODIS_LST_Night.first()))
-              .addBands(ee.Image(MODIS_LST_Blended_Night.first()))
-              .addBands(ee.Image(MODIS_LST_Day.first()))
-              .addBands(ee.Image(MODIS_LST_Blended_Day.first()))
+  // Check if current day exist, otherwise popup a msgbox
+  if (MODIS_LST_Blended_Daily.first().getInfo()){
+    return ee.Image(MODIS_LST_Blended_Daily.first())
+                .addBands(ee.Image(MODIS_LST_Night.first()))
+                .addBands(ee.Image(MODIS_LST_Blended_Night.first()))
+                .addBands(ee.Image(MODIS_LST_Day.first()))
+                .addBands(ee.Image(MODIS_LST_Blended_Day.first()))
+
+  }else{
+      alert("Can\'t calculate LST. \nThe selected date has no data");
+  }
 };
 
 //_________________________________________________
@@ -309,8 +313,10 @@ function makeLegend(vis) {
     widgets: [
       // ui.Label(String(vis['min'])), 
       ui.Label(min.getInfo()), 
+      ui.Label('°C'),
       ui.Label({style: {stretch: 'horizontal'}}), 
-      ui.Label(max.getInfo())
+      ui.Label(max.getInfo()),
+      ui.Label('°C')
     ],
     layout: ui.Panel.Layout.flow('horizontal'),
     style: {stretch: 'horizontal'}
@@ -413,6 +419,7 @@ app.createPanels = function() {
         }else{
             ExportingLinks=ui.Label('Can\'t download, area is too big',{color:'red',fontWeight :'bold'})
             app.export.panel.add(ExportingLinks);
+            alert("Can\'t download, area is too big. \nDownloadable area is limited to 500,000 sq Km");
         }
       }
     })
